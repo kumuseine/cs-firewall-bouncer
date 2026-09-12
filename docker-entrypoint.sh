@@ -12,23 +12,13 @@ fi
 
 mkdir -p /etc/crowdsec/bouncers/
 
+# 纯粹只写必填项，防火墙规则完全继承官方默认的权威最佳实践！
 cat << EOF > /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
 mode: ${MODE}
 api_url: ${API_URL}
 api_key: ${API_KEY}
 log_level: ${LOG_LEVEL}
 log_media: stdout
-nftables:
-  ipv4:
-    enabled: true
-    set-only: false
-    table: crowdsec
-    chain: crowdsec_chain
-  ipv6:
-    enabled: true
-    set-only: false
-    table: crowdsec6
-    chain: crowdsec6_chain
 EOF
 
 exec /usr/local/bin/crowdsec-firewall-bouncer -c /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
