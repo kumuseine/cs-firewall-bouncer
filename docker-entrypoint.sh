@@ -1,7 +1,6 @@
 #!/bin/sh
 set -e
 
-# 默认参数兜底
 API_URL=${API_URL:-"http://localhost:50005/"}
 MODE=${MODE:-"nftables"}
 LOG_LEVEL=${LOG_LEVEL:-"info"}
@@ -13,11 +12,10 @@ fi
 
 mkdir -p /etc/crowdsec/bouncers/
 
-# 纯内存动态生成极简配置文件
 cat << EOF > /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
+mode: ${MODE}
 api_url: ${API_URL}
 api_key: ${API_KEY}
-backend: ${BACKEND}
 log_level: ${LOG_LEVEL}
 log_media: stdout
 nftables:
@@ -33,5 +31,4 @@ nftables:
     chain: crowdsec6_chain
 EOF
 
-# 将进程替换为原生 bouncer（保持 PID 为 1，支持优雅退出）
 exec /usr/local/bin/crowdsec-firewall-bouncer -c /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
