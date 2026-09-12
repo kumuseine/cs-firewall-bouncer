@@ -2,14 +2,14 @@ name: Check Upstream and Build Bouncer
 
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch:
+    branches: [ "main" ] # 任何 push 变动（修改 Dockerfile 或 entrypoint）必重新构建
+  workflow_dispatch:      # 网页上手动点运行，必重新构建
   schedule:
-    - cron: '0 3 * * *' # 每天凌晨 3:00 自动嗅探上游版本
+    - cron: '0 3 * * *'  # 仅在定时巡检时，才按版本号做增量跳过
 
 permissions:
-  contents: write    # 允许在自己仓库打 Git Tag
-  packages: write    # 允许推送到 GHCR
+  contents: write
+  packages: write
 
 jobs:
   check-version:
@@ -21,14 +21,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 拉取所有 Git Tag 用于比对
+          fetch-depth: 0
 
       - name: Check upstream release
         id: check
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 注入凭据，解除 GitHub API 频率限制
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 1. 使用官方 gh CLI 提取上游最新 Release 标签
           UPSTREAM_TAG=$(gh release view --repo crowdsecurity/cs-firewall-bouncer --json tagName --jq .tagName)
           echo "Upstream latest release is: $UPSTREAM_TAG"
 
@@ -37,12 +36,13 @@ jobs:
             exit 1
           fi
 
-          # 2. 检查本地是否已打过该版本标签（手动触发 workflow_dispatch 时强制构建）
-          if git rev-parse "$UPSTREAM_TAG" >/dev/null 2>&1 && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-            echo "Version $UPSTREAM_TAG has already been built. Skipping."
+          # 👇 核心调整：只有在定时任务 (schedule) 触发，且该版本已经打过 Tag 时，才跳过；
+          # 如果是 push 或者 workflow_dispatch，无条件强制重新构建！
+          if [ "${{ github.event_name }}" = "schedule" ] && git rev-parse "$UPSTREAM_TAG" >/dev/null 2>&1; then
+            echo "Scheduled check: Version $UPSTREAM_TAG already built. Skipping."
             echo "needs_build=false" >> $GITHUB_OUTPUT
           else
-            echo "Proceeding to build version: $UPSTREAM_TAG"
+            echo "Triggered by [${{ github.event_name }}]: Force rebuild version $UPSTREAM_TAG"
             echo "needs_build=true" >> $GITHUB_OUTPUT
             echo "target_version=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
           fi
@@ -83,5 +83,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag ${{ needs.check-version.outputs.target_version }} || true
-          git push origin ${{ needs.check-version.outputs.target_version }} || true
+          # 使用 -f 强制刷新 Tag，使其永远指向最新的这次 commit 修复代码
+          git tag -f ${{ needs.check-version.outputs.target_version }}
+          git push origin -f ${{ needs.check-version.outputs.target_version }}
