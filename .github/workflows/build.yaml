@@ -75,7 +75,6 @@ jobs:
           # 核心改动：同时打上 latest、上游版本、以及绑定你当前提交 sha 的精准标签
           tags: |
             ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ needs.check-version.outputs.upstream_version }}
             ghcr.io/${{ github.repository }}:${{ needs.check-version.outputs.upstream_version }}-${{ needs.check-version.outputs.short_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
