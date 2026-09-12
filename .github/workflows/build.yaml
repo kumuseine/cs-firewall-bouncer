@@ -1,0 +1,83 @@
+name: Check Upstream and Build Bouncer
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *' # 每天凌晨 3:00 自动检查上游新版
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      needs_build: ${{ steps.check.outputs.needs_build }}
+      target_version: ${{ steps.check.outputs.target_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check upstream release
+        id: check
+        run: |
+          UPSTREAM_TAG=$(curl -s https://api.github.com/repos/crowdsecurity/cs-firewall-bouncer/releases/latest | jq -r .tag_name)
+          echo "Upstream latest release: $UPSTREAM_TAG"
+
+          if [ -z "$UPSTREAM_TAG" ] || [ "$UPSTREAM_TAG" = "null" ]; then
+            echo "Failed to fetch upstream release!" >&2
+            exit 1
+          fi
+
+          if git rev-parse "$UPSTREAM_TAG" >/dev/null 2>&1 && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "Version $UPSTREAM_TAG already built. Skipping."
+            echo "needs_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "Building version: $UPSTREAM_TAG"
+            echo "needs_build=true" >> $GITHUB_OUTPUT
+            echo "target_version=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-push:
+    needs: check-version
+    if: needs.check-version.outputs.needs_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push AMD64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BOUNCER_VERSION=${{ needs.check-version.outputs.target_version }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.check-version.outputs.target_version }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create Git Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ needs.check-version.outputs.target_version }} || true
+          git push origin ${{ needs.check-version.outputs.target_version }} || true
