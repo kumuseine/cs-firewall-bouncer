@@ -3,7 +3,7 @@ set -e
 
 # 默认参数兜底
 API_URL=${API_URL:-"http://localhost:50005/"}
-BACKEND=${BACKEND:-"nftables"}
+MODE=${MODE:-"nftables"}
 LOG_LEVEL=${LOG_LEVEL:-"info"}
 
 if [ -z "$API_KEY" ]; then
