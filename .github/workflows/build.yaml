@@ -5,11 +5,11 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
   schedule:
-    - cron: '0 3 * * *' # 每天凌晨 3:00 自动检查上游新版
+    - cron: '0 3 * * *' # 每天凌晨 3:00 自动嗅探上游版本
 
 permissions:
-  contents: write
-  packages: write
+  contents: write    # 允许在自己仓库打 Git Tag
+  packages: write    # 允许推送到 GHCR
 
 jobs:
   check-version:
@@ -21,24 +21,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # 拉取所有 Git Tag 用于比对
 
       - name: Check upstream release
         id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 注入凭据，解除 GitHub API 频率限制
         run: |
-          UPSTREAM_TAG=$(curl -s https://api.github.com/repos/crowdsecurity/cs-firewall-bouncer/releases/latest | jq -r .tag_name)
-          echo "Upstream latest release: $UPSTREAM_TAG"
+          # 1. 使用官方 gh CLI 提取上游最新 Release 标签
+          UPSTREAM_TAG=$(gh release view --repo crowdsecurity/cs-firewall-bouncer --json tagName --jq .tagName)
+          echo "Upstream latest release is: $UPSTREAM_TAG"
 
           if [ -z "$UPSTREAM_TAG" ] || [ "$UPSTREAM_TAG" = "null" ]; then
             echo "Failed to fetch upstream release!" >&2
             exit 1
           fi
 
+          # 2. 检查本地是否已打过该版本标签（手动触发 workflow_dispatch 时强制构建）
           if git rev-parse "$UPSTREAM_TAG" >/dev/null 2>&1 && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-            echo "Version $UPSTREAM_TAG already built. Skipping."
+            echo "Version $UPSTREAM_TAG has already been built. Skipping."
             echo "needs_build=false" >> $GITHUB_OUTPUT
           else
-            echo "Building version: $UPSTREAM_TAG"
+            echo "Proceeding to build version: $UPSTREAM_TAG"
             echo "needs_build=true" >> $GITHUB_OUTPUT
             echo "target_version=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
           fi
@@ -54,7 +58,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -75,7 +79,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Create Git Tag
+      - name: Tag and archive release in repository
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
